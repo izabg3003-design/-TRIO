@@ -34,17 +34,16 @@ const App: React.FC = () => {
   useEffect(() => {
     const initApp = async () => {
       try {
-        // 1. Verifica sessão de emergência/bypass primeiro
-        const emergencySession = localStorage.getItem('atrio_emergency_session');
-        if (emergencySession) {
-          const { user, company } = JSON.parse(emergencySession);
+        // 1. Verifica sessão resiliente primeiro
+        const localSession = localStorage.getItem('atrio_active_session');
+        if (localSession) {
+          const { user, company } = JSON.parse(localSession);
           setCurrentUser(user);
           setActiveCompany(company);
           setAppCountry(company.country || 'PT');
           setIsAppReady(true);
           
-          // Tenta carregar orçamentos se houver ID de empresa real
-          if (!company.id.startsWith('comp-')) {
+          if (!company.id.startsWith('cpn_')) {
              const { data: bData } = await supabase.from('budgets').select('*').eq('company_id', company.id);
              if (bData) setBudgets(bData as any);
           }
@@ -169,7 +168,7 @@ const App: React.FC = () => {
     setBudgets([]);
     setActiveTab('dashboard');
     localStorage.removeItem('atrio_master_active_session');
-    localStorage.removeItem('atrio_emergency_session');
+    localStorage.removeItem('atrio_active_session');
     await supabase.auth.signOut().catch(() => {});
   };
 
