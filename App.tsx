@@ -33,24 +33,23 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const initApp = async () => {
+      // Timeout de segurança: Se o Supabase travar por falta de chaves, força a entrada em 1.5s
+      const safetyTimeout = setTimeout(() => {
+        if (!isAppReady) setIsAppReady(true);
+      }, 1500);
+
       try {
-        // 1. Verifica sessão resiliente primeiro
         const localSession = localStorage.getItem('atrio_active_session');
         if (localSession) {
           const { user, company } = JSON.parse(localSession);
           setCurrentUser(user);
           setActiveCompany(company);
           setAppCountry(company.country || 'PT');
+          clearTimeout(safetyTimeout);
           setIsAppReady(true);
-          
-          if (!company.id.startsWith('cpn_')) {
-             const { data: bData } = await supabase.from('budgets').select('*').eq('company_id', company.id);
-             if (bData) setBudgets(bData as any);
-          }
           return;
         }
 
-        // 2. Verifica Master Override
         const masterStored = localStorage.getItem('atrio_master_active_session');
         if (masterStored === 'jefersongoes36@gmail.com') {
           const masterUser: User = {
@@ -63,29 +62,23 @@ const App: React.FC = () => {
           };
           setCurrentUser(masterUser);
           setActiveTab('master');
+          clearTimeout(safetyTimeout);
           setIsAppReady(true);
           return;
         }
 
-        // 3. Verifica sessão normal Supabase
         const { data: sessionData } = await supabase.auth.getSession();
         const session = sessionData?.session;
 
         if (session) {
           const email = session.user.email?.toLowerCase();
-          if (email === 'jefersongoes36@gmail.com') {
-             localStorage.setItem('atrio_master_active_session', email);
-             window.location.reload();
-             return;
-          }
-
           const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
           const userObj: User = {
             id: session.user.id,
             email: session.user.email!,
             companyId: profile?.company_id || 'pending',
             isVerified: true,
-            role: profile?.role || 'User',
+            role: profile?.role || (email === 'jefersongoes36@gmail.com' ? 'Master' : 'User'),
             status: profile?.status || 'Active'
           };
           setCurrentUser(userObj);
@@ -96,13 +89,12 @@ const App: React.FC = () => {
               setActiveCompany(company as any);
               setAppCountry(company.country || 'PT');
             }
-            const { data: bData } = await supabase.from('budgets').select('*').eq('company_id', userObj.companyId);
-            if (bData) setBudgets(bData as any);
           }
         }
       } catch (err) {
-        console.warn("Resiliência ativada.");
+        console.warn("Resiliência ativada: Ignorando erro de conexão.");
       } finally {
+        clearTimeout(safetyTimeout);
         setIsAppReady(true);
       }
     };
@@ -115,12 +107,10 @@ const App: React.FC = () => {
 
   const handleSaveBudget = async (budget: Budget) => {
     const companyId = activeCompany?.id || 'master-hq';
-    
     setBudgets(prev => {
       const exists = prev.find(b => b.id === budget.id);
       return exists ? prev.map(b => b.id === budget.id ? budget : b) : [...prev, budget];
     });
-
     try {
       await supabase.from('budgets').upsert({
         id: budget.id,
@@ -137,10 +127,7 @@ const App: React.FC = () => {
         tax_rate: budget.taxRate,
         is_vat_enabled: budget.isVatEnabled
       });
-    } catch (e) {
-      console.warn("Salvamento offline.");
-    }
-
+    } catch (e) {}
     setActiveTab('dashboard');
     setEditingBudget(null);
   };
@@ -149,11 +136,6 @@ const App: React.FC = () => {
     setCurrentUser(user);
     setActiveCompany(company);
     setAppCountry(country);
-    
-    if (user.role === 'Master') {
-      localStorage.setItem('atrio_master_active_session', user.email);
-    }
-    
     setShowSplash(true);
     setTimeout(() => {
       setIsFadingOut(true);
@@ -175,7 +157,7 @@ const App: React.FC = () => {
   if (!isAppReady) return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
       <Loader2 className="animate-spin text-indigo-500" size={48} />
-      <p className="text-white text-[10px] font-black uppercase tracking-widest italic animate-pulse">Átrio Cloud: Reconectando...</p>
+      <p className="text-white text-[10px] font-black uppercase tracking-widest italic animate-pulse">Átrio Cloud: Iniciando...</p>
     </div>
   );
 
