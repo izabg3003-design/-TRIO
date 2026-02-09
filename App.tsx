@@ -32,12 +32,12 @@ const App: React.FC = () => {
   const [isFadingOut, setIsFadingOut] = useState(false);
 
   useEffect(() => {
-    const initApp = async () => {
-      // Timeout de segurança: Se o Supabase travar por falta de chaves, força a entrada em 1.5s
-      const safetyTimeout = setTimeout(() => {
-        if (!isAppReady) setIsAppReady(true);
-      }, 1500);
+    // FORCE READY: Se nada acontecer em 1 segundo, abre o ecrã de login
+    const timer = setTimeout(() => {
+      setIsAppReady(true);
+    }, 1000);
 
+    const initApp = async () => {
       try {
         const localSession = localStorage.getItem('atrio_active_session');
         if (localSession) {
@@ -45,92 +45,40 @@ const App: React.FC = () => {
           setCurrentUser(user);
           setActiveCompany(company);
           setAppCountry(company.country || 'PT');
-          clearTimeout(safetyTimeout);
-          setIsAppReady(true);
           return;
         }
 
         const masterStored = localStorage.getItem('atrio_master_active_session');
         if (masterStored === 'jefersongoes36@gmail.com') {
-          const masterUser: User = {
-            id: 'master-override',
-            email: masterStored,
-            companyId: 'master-hq',
-            isVerified: true,
-            role: 'Master',
-            status: 'Active'
-          };
-          setCurrentUser(masterUser);
+          setCurrentUser({ id: 'master', email: masterStored, companyId: 'master', isVerified: true, role: 'Master', status: 'Active' });
           setActiveTab('master');
-          clearTimeout(safetyTimeout);
-          setIsAppReady(true);
           return;
         }
 
-        const { data: sessionData } = await supabase.auth.getSession();
-        const session = sessionData?.session;
-
-        if (session) {
-          const email = session.user.email?.toLowerCase();
-          const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-          const userObj: User = {
-            id: session.user.id,
-            email: session.user.email!,
-            companyId: profile?.company_id || 'pending',
-            isVerified: true,
-            role: profile?.role || (email === 'jefersongoes36@gmail.com' ? 'Master' : 'User'),
-            status: profile?.status || 'Active'
-          };
-          setCurrentUser(userObj);
-          
-          if (userObj.companyId !== 'pending') {
-            const { data: company } = await supabase.from('companies').select('*').eq('id', userObj.companyId).single();
-            if (company) {
-              setActiveCompany(company as any);
-              setAppCountry(company.country || 'PT');
+        const { data } = await supabase.auth.getSession();
+        if (data?.session) {
+          const user = data.session.user;
+          const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+          if (profile) {
+            setCurrentUser({ id: user.id, email: user.email!, companyId: profile.company_id, isVerified: true, role: profile.role, status: profile.status });
+            const { data: comp } = await supabase.from('companies').select('*').eq('id', profile.company_id).single();
+            if (comp) {
+              setActiveCompany(comp as any);
+              setAppCountry(comp.country || 'PT');
             }
           }
         }
-      } catch (err) {
-        console.warn("Resiliência ativada: Ignorando erro de conexão.");
+      } catch (e) {
+        console.warn("Falha no boot silencioso.");
       } finally {
-        clearTimeout(safetyTimeout);
         setIsAppReady(true);
+        clearTimeout(timer);
       }
     };
 
     initApp();
+    return () => clearTimeout(timer);
   }, []);
-
-  const config = COUNTRY_CONFIGS[appCountry] || COUNTRY_CONFIGS['PT'];
-  const t = config.translations;
-
-  const handleSaveBudget = async (budget: Budget) => {
-    const companyId = activeCompany?.id || 'master-hq';
-    setBudgets(prev => {
-      const exists = prev.find(b => b.id === budget.id);
-      return exists ? prev.map(b => b.id === budget.id ? budget : b) : [...prev, budget];
-    });
-    try {
-      await supabase.from('budgets').upsert({
-        id: budget.id,
-        company_id: companyId,
-        number: budget.number,
-        date: budget.date,
-        valid_until: budget.validUntil,
-        client: budget.client,
-        items: budget.items,
-        expenses: budget.expenses || [],
-        payments: budget.payments || [],
-        notes: budget.notes,
-        status: budget.status,
-        tax_rate: budget.taxRate,
-        is_vat_enabled: budget.isVatEnabled
-      });
-    } catch (e) {}
-    setActiveTab('dashboard');
-    setEditingBudget(null);
-  };
 
   const handleAuthSuccess = (user: User, company: Company | null, country: CountryCode) => {
     setCurrentUser(user);
@@ -140,26 +88,29 @@ const App: React.FC = () => {
     setTimeout(() => {
       setIsFadingOut(true);
       setTimeout(() => { setShowSplash(false); setIsFadingOut(false); }, 1000);
-    }, 2000);
-    setActiveTab(user.role === 'Master' ? 'master' : 'dashboard');
+    }, 1500);
   };
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     setCurrentUser(null);
     setActiveCompany(null);
-    setBudgets([]);
-    setActiveTab('dashboard');
-    localStorage.removeItem('atrio_master_active_session');
     localStorage.removeItem('atrio_active_session');
-    await supabase.auth.signOut().catch(() => {});
+    localStorage.removeItem('atrio_master_active_session');
+    setIsAppReady(true);
   };
 
-  if (!isAppReady) return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
-      <Loader2 className="animate-spin text-indigo-500" size={48} />
-      <p className="text-white text-[10px] font-black uppercase tracking-widest italic animate-pulse">Átrio Cloud: Iniciando...</p>
-    </div>
-  );
+  const config = COUNTRY_CONFIGS[appCountry] || COUNTRY_CONFIGS['PT'];
+  const t = config.translations;
+
+  if (!isAppReady) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 text-center">
+        <Loader2 className="animate-spin text-indigo-500 mb-4" size={48} />
+        <h1 className="text-white text-xl font-black uppercase tracking-widest italic animate-pulse">Átrio Cloud</h1>
+        <p className="text-slate-500 text-[10px] font-bold uppercase tracking-widest mt-2">Sincronizando Ambiente Profissional...</p>
+      </div>
+    );
+  }
 
   if (!currentUser) return <Auth onAuthSuccess={handleAuthSuccess} initialCountry={appCountry} />;
 
@@ -215,32 +166,12 @@ const App: React.FC = () => {
           </header>
           <div className="p-8">
             {activeTab === 'dashboard' && <Dashboard budgets={budgets} onViewBudget={(b) => { setEditingBudget(b); setActiveTab('budgetHub'); }} onNewBudget={() => { setEditingBudget(null); setActiveTab('newBudget'); }} company={activeCompany || fallbackCompany} />}
-            {activeTab === 'newBudget' && <BudgetEditor company={activeCompany || fallbackCompany} onSave={handleSaveBudget} initialData={editingBudget} onCancel={() => setActiveTab('dashboard')} onUpgrade={() => setActiveTab('subscription')} />}
+            {activeTab === 'newBudget' && <BudgetEditor company={activeCompany || fallbackCompany} onSave={(b) => { setBudgets([...budgets, b]); setActiveTab('dashboard'); }} initialData={editingBudget} onCancel={() => setActiveTab('dashboard')} onUpgrade={() => setActiveTab('subscription')} />}
             {activeTab === 'analytics' && <Analytics budgets={budgets} company={activeCompany || fallbackCompany} onUpgrade={() => setActiveTab('subscription')} />}
             {activeTab === 'subscription' && <SubscriptionPage company={activeCompany || fallbackCompany} onUpgrade={() => {}} />}
             {activeTab === 'settings' && <CompanySettings company={activeCompany || fallbackCompany} user={currentUser} onSave={() => {}} />}
             {activeTab === 'master' && isMaster && <MasterDashboard />}
             {activeTab === 'notifications' && <NotificationsHub notifications={notifications} isMaster={isMaster} onSync={setNotifications} onMarkAsRead={(id) => setReadNotifications([...readNotifications, id])} readNotifications={readNotifications} company={activeCompany || fallbackCompany} />}
-            
-            {activeTab === 'budgetHub' && editingBudget && (
-              <div className="space-y-8">
-                <div className="flex items-center justify-between">
-                  <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-black text-xs uppercase tracking-widest">
-                    <ArrowLeft size={16} /> {t.hub.back}
-                  </button>
-                  <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200">
-                    <button onClick={() => setHubTab('summary')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'summary' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Resumo</button>
-                    <button onClick={() => setHubTab('info')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'info' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Info</button>
-                    <button onClick={() => setHubTab('payments')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'payments' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Pagamentos</button>
-                    <button onClick={() => setHubTab('expenses')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'expenses' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-600'}`}>Custos</button>
-                  </div>
-                </div>
-                {hubTab === 'summary' && <ProjectDashboard budget={editingBudget} company={activeCompany || fallbackCompany} />}
-                {hubTab === 'info' && <BudgetEditor company={activeCompany || fallbackCompany} onSave={handleSaveBudget} initialData={editingBudget} onCancel={() => setActiveTab('dashboard')} onUpgrade={() => setActiveTab('subscription')} />}
-                {hubTab === 'payments' && <PaymentManager budget={editingBudget} company={activeCompany || fallbackCompany} onUpdateBudget={handleSaveBudget} onUpgrade={() => setActiveTab('subscription')} />}
-                {hubTab === 'expenses' && <ExpenseManager budget={editingBudget} company={activeCompany || fallbackCompany} onUpdateBudget={handleSaveBudget} onUpgrade={() => setActiveTab('subscription')} />}
-              </div>
-            )}
           </div>
         </main>
       </div>
