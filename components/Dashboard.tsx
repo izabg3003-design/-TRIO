@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { Budget, Specialty, Company } from '../types.ts';
+import { Budget, Specialty, Company } from '../types';
 import { 
   FileText, 
   Plus, 
@@ -17,7 +17,7 @@ import {
   Hammer,
   Eye
 } from 'lucide-react';
-import { COUNTRY_CONFIGS, SPECIALTY_COLORS } from '../constants.tsx';
+import { COUNTRY_CONFIGS, SPECIALTY_COLORS } from '../constants';
 
 interface DashboardProps {
   budgets: Budget[];
@@ -27,7 +27,7 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ budgets, onViewBudget, onNewBudget, company }) => {
-  const config = COUNTRY_CONFIGS[company.country];
+  const config = COUNTRY_CONFIGS[company.country] || COUNTRY_CONFIGS['PT'];
   const t = config.translations;
 
   const stats = useMemo(() => {
