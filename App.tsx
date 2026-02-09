@@ -44,7 +44,6 @@ const App: React.FC = () => {
     if (savedCountry) setAppCountry(savedCountry);
     if (savedRead) setReadNotifications(JSON.parse(savedRead));
 
-    // Lógica de Expiração Automática de Notificações (3 Dias)
     if (savedNotifications) {
       const allNotes = JSON.parse(savedNotifications) as AppNotification[];
       const now = new Date();
@@ -75,30 +74,27 @@ const App: React.FC = () => {
     setIsAppReady(true);
   }, []);
 
-  // Lógica CRÍTICA: Verificação de Expiração e Downgrade Automático
+  // Lógica de Verificação de Expiração e Downgrade Automático
   useEffect(() => {
     if (activeCompany && isAppReady) {
       const now = new Date();
       
-      // 1. Verificar se a assinatura Premium expirou
       if (activeCompany.plan === 'Premium' && activeCompany.subscriptionExpiryDate) {
         const expiry = new Date(activeCompany.subscriptionExpiryDate);
         
         if (now > expiry) {
-          // EXPIROU: Realizar Downgrade para plano Free
           const downgradedCompany: Company = {
             ...activeCompany,
             plan: 'Free',
-            subscriptionExpiryDate: undefined // Remove a data de expiração do Premium
+            subscriptionExpiryDate: undefined
           };
           
           handleUpdateCompany(downgradedCompany);
-          alert("Sua assinatura Premium expirou. Sua conta retornou ao plano Básico. Seus dados estão salvos, mas alguns recursos foram limitados.");
+          alert("A sua assinatura Premium expirou. A conta retornou ao plano Básico. Os seus dados foram preservados, mas os recursos Premium foram limitados.");
           setActiveTab('subscription');
           return;
         }
 
-        // 2. Verificar se deve mostrar a tira de alerta (últimos 3 dias)
         const diffTime = expiry.getTime() - now.getTime();
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
@@ -255,12 +251,9 @@ const App: React.FC = () => {
     if (budget.status === 'Draft' && initialSubTab !== 'info') {
        initialSubTab = 'info';
     }
-    // Lógica de Bloqueio para Downgraded Users: Podem ver o HUB de orçamentos antigos, mas não podem adicionar novos pagamentos/custos se já excederam o limite básico de 3 obras aprovadas
     if (!isPremiumPlan && (initialSubTab === 'payments' || initialSubTab === 'expenses' || initialSubTab === 'summary')) {
       const approvedBudgets = companyBudgets.filter(b => b.status === 'Approved');
       const budgetIndex = approvedBudgets.findIndex(b => b.id === budget.id);
-      
-      // No plano free, apenas as 3 primeiras obras aprovadas permitem gestão financeira
       if (budgetIndex >= 3 && budget.status === 'Approved') {
         alert(t.limitReached + ": " + (initialSubTab === 'payments' ? t.payments.limitFree : t.expenses.limitFree));
         setActiveTab('subscription');
@@ -281,7 +274,7 @@ const App: React.FC = () => {
           <div className="flex items-center gap-3">
              <AlertCircle size={20} className="animate-pulse" />
              <p className="text-xs font-black uppercase tracking-widest leading-none">
-               {/* Fix: Replace now with new Date() to avoid "now is not defined" error */}
+               {/* CORREÇÃO: Utilizando new Date() diretamente para evitar ReferenceError */}
                {t.renewalAlert.replace('{days}', (activeCompany?.subscriptionExpiryDate ? Math.max(0, Math.ceil((new Date(activeCompany.subscriptionExpiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))) : 3).toString())}
              </p>
           </div>
