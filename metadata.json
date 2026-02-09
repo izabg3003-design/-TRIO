@@ -1,0 +1,7 @@
+{
+  "name": "Átrio SaaS",
+  "description": "Uma plataforma completa para gestão de orçamentos na construção civil, permitindo múltiplas empresas, especialidades diversas (pedreiro, canalizador, eletricista, etc.) e exportação de PDFs profissionais estruturados.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
