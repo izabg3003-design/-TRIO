@@ -1,19 +1,20 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { Company, Budget, User, CountryCode, AppNotification } from './types';
-import Dashboard from './components/Dashboard';
-import BudgetEditor from './components/BudgetEditor';
-import CompanySettings from './components/CompanySettings';
-import Analytics from './components/Analytics';
-import Auth from './components/Auth';
-import SubscriptionPage from './components/SubscriptionPage';
-import PaymentManager from './components/PaymentManager';
-import ExpenseManager from './components/ExpenseManager';
-import ProjectDashboard from './components/ProjectDashboard';
-import MasterDashboard from './components/MasterDashboard';
-import NotificationsHub from './components/NotificationsHub';
-import { LayoutDashboard, Settings, PlusCircle, LogOut, Crown, Sparkles, BarChart3, CreditCard, Globe, AlertTriangle, Wallet, Hammer, ArrowLeft, PieChart, Loader2, ShieldCheck, Bell, Megaphone, X, AlertCircle } from 'lucide-react';
-import { COUNTRY_CONFIGS } from './constants';
+import React, { useState, useEffect } from 'react';
+import { Company, Budget, User, CountryCode, AppNotification } from './types.ts';
+import { supabase } from './lib/supabase.ts';
+import Dashboard from './components/Dashboard.tsx';
+import BudgetEditor from './components/BudgetEditor.tsx';
+import CompanySettings from './components/CompanySettings.tsx';
+import Analytics from './components/Analytics.tsx';
+import Auth from './components/Auth.tsx';
+import SubscriptionPage from './components/SubscriptionPage.tsx';
+import PaymentManager from './components/PaymentManager.tsx';
+import ExpenseManager from './components/ExpenseManager.tsx';
+import ProjectDashboard from './components/ProjectDashboard.tsx';
+import MasterDashboard from './components/MasterDashboard.tsx';
+import NotificationsHub from './components/NotificationsHub.tsx';
+import { LayoutDashboard, Settings, PlusCircle, BarChart3, CreditCard, ArrowLeft, ShieldCheck, Loader2 } from 'lucide-react';
+import { COUNTRY_CONFIGS } from './constants.tsx';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -26,438 +27,200 @@ const App: React.FC = () => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [readNotifications, setReadNotifications] = useState<string[]>([]);
   
-  // Lógica de Alerta de Renovação (3 Dias / 4 vezes ao dia = 6h)
-  const [showRenewalStrip, setShowRenewalStrip] = useState(false);
-
   const [isAppReady, setIsAppReady] = useState(false);
   const [showSplash, setShowSplash] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem('atrio_user');
-    const savedBudgets = localStorage.getItem('atrio_all_budgets');
-    const savedCompanies = localStorage.getItem('atrio_companies');
-    const savedCountry = localStorage.getItem('atrio_app_country') as CountryCode;
-    const savedNotifications = localStorage.getItem('atrio_global_notifications');
-    const savedRead = localStorage.getItem('atrio_read_notifications');
-    
-    if (savedCountry) setAppCountry(savedCountry);
-    if (savedRead) setReadNotifications(JSON.parse(savedRead));
+    const initApp = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session) {
+          const email = session.user.email?.toLowerCase();
+          const isMasterEmail = email === 'jefersongoes36@gmail.com';
 
-    if (savedNotifications) {
-      const allNotes = JSON.parse(savedNotifications) as AppNotification[];
-      const now = new Date();
-      const validNotes = allNotes.filter(n => new Date(n.expiresAt) > now);
-      setNotifications(validNotes);
-      if (validNotes.length !== allNotes.length) {
-        localStorage.setItem('atrio_global_notifications', JSON.stringify(validNotes));
-      }
-    }
+          // Forçar acesso Master imediato
+          const userObj: User = {
+            id: session.user.id,
+            email: session.user.email!,
+            companyId: 'master-bypass',
+            isVerified: true,
+            role: isMasterEmail ? 'Master' : 'User',
+            status: 'Active'
+          };
 
-    if (savedUser) {
-      const user = JSON.parse(savedUser) as User;
-      if (user.role === 'Master') {
-        setCurrentUser(user);
-        setActiveTab('master');
-      } else {
-        setCurrentUser(user);
-        if (savedCompanies) {
-          const companies = JSON.parse(savedCompanies) as Company[];
-          const company = companies.find(c => c.id === user.companyId);
-          if (company) {
-            setActiveCompany(company);
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (profile) {
+            userObj.companyId = profile.company_id;
+            userObj.role = isMasterEmail ? 'Master' : profile.role;
+            userObj.status = profile.status;
           }
+
+          setCurrentUser(userObj);
+
+          if (userObj.companyId !== 'master-bypass') {
+            const { data: company } = await supabase.from('companies').select('*').eq('id', userObj.companyId).single();
+            if (company) {
+              setActiveCompany(company as any);
+              setAppCountry(company.country || 'PT');
+            }
+          }
+
+          const budgetQuery = supabase.from('budgets').select('*');
+          if (!isMasterEmail && userObj.companyId !== 'master-bypass') {
+            budgetQuery.eq('company_id', userObj.companyId);
+          }
+          const { data: bData } = await budgetQuery;
+          if (bData) setBudgets(bData as any);
+          
+          if (isMasterEmail) setActiveTab('master');
         }
+      } catch (e) {
+        console.error("Erro na inicialização:", e);
+      } finally {
+        setIsAppReady(true);
       }
-    }
-    if (savedBudgets) setBudgets(JSON.parse(savedBudgets));
-    setIsAppReady(true);
+    };
+
+    initApp();
   }, []);
 
-  // Lógica de Verificação de Expiração e Downgrade Automático
-  useEffect(() => {
-    if (activeCompany && isAppReady) {
-      const now = new Date();
-      
-      if (activeCompany.plan === 'Premium' && activeCompany.subscriptionExpiryDate) {
-        const expiry = new Date(activeCompany.subscriptionExpiryDate);
-        
-        if (now > expiry) {
-          const downgradedCompany: Company = {
-            ...activeCompany,
-            plan: 'Free',
-            subscriptionExpiryDate: undefined
-          };
-          
-          handleUpdateCompany(downgradedCompany);
-          alert("A sua assinatura Premium expirou. A conta retornou ao plano Básico. Os seus dados foram preservados, mas os recursos Premium foram limitados.");
-          setActiveTab('subscription');
-          return;
-        }
-
-        const diffTime = expiry.getTime() - now.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        if (diffDays <= 3 && diffDays >= 0) {
-          const lastDismiss = localStorage.getItem(`atrio_renewal_dismiss_${activeCompany.id}`);
-          const SIX_HOURS = 6 * 60 * 60 * 1000;
-          
-          if (!lastDismiss || (now.getTime() - parseInt(lastDismiss)) > SIX_HOURS) {
-            setShowRenewalStrip(true);
-          }
-        } else {
-          setShowRenewalStrip(false);
-        }
-      }
-    }
-  }, [activeCompany?.id, activeCompany?.plan, isAppReady]);
-
-  useEffect(() => {
-    if (isAppReady) localStorage.setItem('atrio_all_budgets', JSON.stringify(budgets));
-  }, [budgets, isAppReady]);
-
-  const isMaster = currentUser?.role === 'Master';
   const config = COUNTRY_CONFIGS[appCountry];
   const t = config.translations;
-  const companyBudgets = activeCompany ? budgets.filter(b => b.companyId === activeCompany.id) : [];
 
-  const relevantNotifications = useMemo(() => {
-    if (isMaster) return notifications;
-    if (!activeCompany) return [];
-    return notifications.filter(n => 
-      n.target === 'All' || 
-      (n.target === 'Premium' && activeCompany.plan === 'Premium') ||
-      (n.target === 'Free' && activeCompany.plan === 'Free')
-    );
-  }, [notifications, activeCompany?.plan, isMaster]);
-
-  const unreadCount = useMemo(() => {
-    if (isMaster) return 0;
-    return relevantNotifications.filter(n => !readNotifications.includes(n.id)).length;
-  }, [relevantNotifications, readNotifications, isMaster]);
-
-  const handleDismissRenewalStrip = () => {
-    setShowRenewalStrip(false);
-    if (activeCompany) {
-      localStorage.setItem(`atrio_renewal_dismiss_${activeCompany.id}`, Date.now().toString());
-    }
-  };
-
-  const handleCountrySwitch = (code: CountryCode) => {
-    setAppCountry(code);
-    localStorage.setItem('atrio_app_country', code);
-  };
-
-  const handleSaveBudget = (budget: Budget) => {
-    const isNew = !prevBudgets().find(b => b.id === budget.id);
-    if (activeCompany?.plan === 'Free' && companyBudgets.length >= 3 && isNew) {
-      alert(t.limitReached + ": " + t.subscription.features.budgets3);
-      setActiveTab('subscription');
-      return;
-    }
+  const handleSaveBudget = async (budget: Budget) => {
+    if (!activeCompany) return;
+    const { error } = await supabase.from('budgets').upsert({
+      id: budget.id,
+      company_id: activeCompany.id,
+      number: budget.number,
+      date: budget.date,
+      valid_until: budget.validUntil,
+      client: budget.client,
+      items: budget.items,
+      expenses: budget.expenses || [],
+      payments: budget.payments || [],
+      notes: budget.notes,
+      status: budget.status,
+      tax_rate: budget.taxRate,
+      is_vat_enabled: budget.isVatEnabled
+    });
+    if (error) { alert("Erro ao sincronizar: " + error.message); return; }
     setBudgets(prev => {
       const exists = prev.find(b => b.id === budget.id);
-      if (exists) return prev.map(b => b.id === budget.id ? budget : b);
-      return [...prev, { ...budget, companyId: activeCompany!.id }];
+      return exists ? prev.map(b => b.id === budget.id ? budget : b) : [...prev, budget];
     });
     setActiveTab('dashboard');
     setEditingBudget(null);
   };
 
-  const handleUpdateBudget = (budget: Budget) => {
-    setBudgets(prev => prev.map(b => b.id === budget.id ? budget : b));
-  };
-
-  const prevBudgets = () => {
-    const saved = localStorage.getItem('atrio_all_budgets');
-    return saved ? JSON.parse(saved) as Budget[] : [];
-  };
-
   const handleAuthSuccess = (user: User, company: Company | null, country: CountryCode) => {
     setCurrentUser(user);
-    if (user.role === 'Master') {
-      setActiveTab('master');
-    } else {
-      setActiveCompany(company);
-      setActiveTab('dashboard');
-    }
-    
+    setActiveCompany(company);
     setAppCountry(country);
-    localStorage.setItem('atrio_user', JSON.stringify(user));
-    localStorage.setItem('atrio_app_country', country);
-    
-    if (company) {
-      const savedCompaniesRaw = localStorage.getItem('atrio_companies');
-      const savedCompanies = savedCompaniesRaw ? JSON.parse(savedCompaniesRaw) : [];
-      if (!savedCompanies.find((c: Company) => c.id === company.id)) {
-        localStorage.setItem('atrio_companies', JSON.stringify([...savedCompanies, company]));
-      }
-    }
-
     setShowSplash(true);
     setTimeout(() => {
       setIsFadingOut(true);
-      setTimeout(() => {
-        setShowSplash(false);
-        setIsFadingOut(false);
-      }, 1000); 
-    }, 2800);
+      setTimeout(() => { setShowSplash(false); setIsFadingOut(false); }, 1000);
+    }, 2000);
+    setActiveTab(user.role === 'Master' ? 'master' : 'dashboard');
+    window.location.reload(); 
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('atrio_user');
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setCurrentUser(null);
     setActiveCompany(null);
     setActiveTab('dashboard');
   };
 
-  const handleUpdateCompany = (newCompany: Company) => {
-    setActiveCompany(newCompany);
-    const savedCompaniesRaw = localStorage.getItem('atrio_companies');
-    if (savedCompaniesRaw) {
-      const companies = JSON.parse(savedCompaniesRaw) as Company[];
-      const updated = companies.map(c => c.id === newCompany.id ? newCompany : c);
-      localStorage.setItem('atrio_companies', JSON.stringify(updated));
-    }
-  };
+  if (!isAppReady) return (
+    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
+      <Loader2 className="animate-spin text-indigo-500" size={48} />
+      <p className="text-white text-[10px] font-black uppercase tracking-widest">Sincronizando Átrio Cloud...</p>
+    </div>
+  );
 
-  const handleSyncNotifications = (newNotes: AppNotification[]) => {
-    setNotifications(newNotes);
-    localStorage.setItem('atrio_global_notifications', JSON.stringify(newNotes));
-  };
+  if (!currentUser) return <Auth onAuthSuccess={handleAuthSuccess} initialCountry={appCountry} />;
 
-  const handleMarkAsRead = (id: string) => {
-    if (!readNotifications.includes(id)) {
-      const updated = [...readNotifications, id];
-      setReadNotifications(updated);
-      localStorage.setItem('atrio_read_notifications', JSON.stringify(updated));
-    }
-  };
-
-  if (!isAppReady) return null;
-  if (!currentUser || (!isMaster && !activeCompany)) return <Auth onAuthSuccess={handleAuthSuccess} initialCountry={appCountry} />;
-
-  const displayCompany: Company | null = activeCompany ? {
-    ...activeCompany,
-    country: appCountry
-  } : null;
-
-  const isFree = displayCompany?.plan === 'Free';
-  const usageCount = companyBudgets.length;
-  const usagePercent = isFree ? Math.min((usageCount / 3) * 100, 100) : 100;
-  const isPremiumPlan = displayCompany?.plan === 'Premium';
-
-  const openBudgetHub = (budget: Budget, initialSubTab: 'summary' | 'info' | 'payments' | 'expenses' = 'summary') => {
-    if (budget.status === 'Draft' && initialSubTab !== 'info') {
-       initialSubTab = 'info';
-    }
-    if (!isPremiumPlan && (initialSubTab === 'payments' || initialSubTab === 'expenses' || initialSubTab === 'summary')) {
-      const approvedBudgets = companyBudgets.filter(b => b.status === 'Approved');
-      const budgetIndex = approvedBudgets.findIndex(b => b.id === budget.id);
-      if (budgetIndex >= 3 && budget.status === 'Approved') {
-        alert(t.limitReached + ": " + (initialSubTab === 'payments' ? t.payments.limitFree : t.expenses.limitFree));
-        setActiveTab('subscription');
-        return;
-      }
-    }
-    setEditingBudget(budget);
-    setHubTab(initialSubTab);
-    setActiveTab('budgetHub');
-  };
+  const isMaster = currentUser.role === 'Master';
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50">
-      
-      {/* RENEWAL STRIP - TIRA DE RENOVAÇÃO NO TOPO */}
-      {showRenewalStrip && !isMaster && (
-        <div className="bg-red-600 text-white px-6 py-2.5 flex items-center justify-between animate-in slide-in-from-top duration-500 z-[100] shadow-lg sticky top-0">
-          <div className="flex items-center gap-3">
-             <AlertCircle size={20} className="animate-pulse" />
-             <p className="text-xs font-black uppercase tracking-widest leading-none">
-               {/* CORREÇÃO: Utilizando new Date() diretamente para evitar ReferenceError */}
-               {t.renewalAlert.replace('{days}', (activeCompany?.subscriptionExpiryDate ? Math.max(0, Math.ceil((new Date(activeCompany.subscriptionExpiryDate).getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24))) : 3).toString())}
-             </p>
-          </div>
-          <div className="flex items-center gap-4">
-             <button onClick={() => setActiveTab('subscription')} className="bg-white text-red-600 px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-slate-100 transition-colors shadow-sm">
-               Renovar Agora
-             </button>
-             <button onClick={handleDismissRenewalStrip} className="p-1 hover:bg-black/10 rounded-full transition-colors">
-               <X size={18} />
-             </button>
-          </div>
-        </div>
-      )}
-
       <div className="flex flex-1">
-        {/* SPLASH SCREEN */}
         {showSplash && (
           <div className={`fixed inset-0 z-[110] bg-slate-900 flex flex-col items-center justify-center transition-opacity duration-1000 ${isFadingOut ? 'opacity-0' : 'opacity-100'}`}>
-            <div className="flex flex-col items-center gap-10 animate-in zoom-in-90 duration-1000">
-              <div className="w-80 h-80 bg-white p-6 rounded-[3rem] shadow-[0_0_80px_rgba(255,255,255,0.1)] flex items-center justify-center overflow-hidden ring-12 ring-white/5 animate-pulse relative group">
-                  <div className="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
-                  {isMaster ? (
-                    <ShieldCheck size={120} className="text-indigo-600 drop-shadow-2xl" />
-                  ) : (
-                    <img src={activeCompany?.logo} alt={activeCompany?.name} className="max-w-full max-h-full object-contain drop-shadow-2xl" />
-                  )}
+            <div className="text-center space-y-4">
+              <div className="w-24 h-24 bg-white rounded-3xl mx-auto flex items-center justify-center shadow-2xl overflow-hidden p-2">
+                {activeCompany?.logo ? <img src={activeCompany.logo} className="w-full h-full object-contain" /> : <ShieldCheck size={48} className="text-indigo-600" />}
               </div>
-              <div className="text-center space-y-3">
-                <p className="text-indigo-400 font-black text-xs uppercase tracking-[0.8em]">{t.hub.welcome}</p>
-                <h1 className="text-white text-5xl font-black uppercase tracking-tighter">{isMaster ? 'Master Control' : activeCompany?.name}</h1>
-              </div>
-              <div className="flex items-center gap-3 mt-10">
-                <div className="w-6 h-6 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>
-                <span className="text-slate-500 text-[11px] font-black uppercase tracking-[0.2em]">{t.hub.configuring}</span>
-              </div>
+              <h1 className="text-white text-3xl font-black uppercase tracking-widest">{activeCompany?.name || 'ÁTRIO'}</h1>
             </div>
           </div>
         )}
 
-        <aside className="w-64 bg-white border-r border-slate-200 hidden md:flex flex-col fixed inset-y-0 shadow-xl z-40">
-          <div className="p-6 border-b border-slate-100 flex items-center gap-3 cursor-pointer" onClick={() => setActiveTab(isMaster ? 'master' : 'dashboard')}>
-            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-lg">
-              <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6" stroke="currentColor" strokeWidth="2.5"><path d="M3 21h18M3 7v14M21 7v14M12 3l9 4-9 4-9-4 9-4z" /></svg>
-            </div>
+        <aside className="w-64 bg-white border-r hidden md:flex flex-col fixed inset-y-0 z-40">
+          <div className="p-6 border-b flex items-center gap-3">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white"><LayoutDashboard size={20} /></div>
             <span className="font-black text-2xl tracking-tighter">ÁTRIO<span className="text-indigo-600">.</span></span>
           </div>
-          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-            {isMaster ? (
-              <>
-                <button onClick={() => setActiveTab('master')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'master' ? 'bg-indigo-600 text-white font-bold shadow-lg shadow-indigo-100' : 'text-slate-600 hover:bg-slate-50'}`}><ShieldCheck size={20} /> Master Control</button>
-                <button onClick={() => setActiveTab('notifications')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'notifications' ? 'bg-indigo-600 text-white font-bold shadow-lg shadow-indigo-100' : 'text-slate-600 hover:bg-slate-50'}`}>
-                  <Bell size={20} /> Disparo Notificações
-                </button>
-              </>
-            ) : (
-              <>
-                <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><LayoutDashboard size={20} /> {t.sidebar.dashboard}</button>
-                <button onClick={() => setActiveTab('notifications')} className={`w-full flex items-center justify-between px-4 py-3 rounded-xl transition-all ${activeTab === 'notifications' ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}>
-                  <div className="flex items-center gap-3"><Bell size={20} /> {t.notifications.title}</div>
-                  {unreadCount > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full shadow-lg animate-bounce">
-                      {unreadCount}
-                    </span>
-                  )}
-                </button>
-                <button onClick={() => setActiveTab('analytics')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'analytics' ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><BarChart3 size={20} /> {t.sidebar.analytics} {!isPremiumPlan && <Sparkles size={14} className="text-amber-500 ml-auto" />}</button>
-                <button onClick={() => { setEditingBudget(null); setActiveTab('newBudget'); }} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'newBudget' ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><PlusCircle size={20} /> {t.sidebar.newBudget}</button>
-                <button onClick={() => setActiveTab('subscription')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'subscription' ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><CreditCard size={20} /> {t.sidebar.subscription}</button>
-                <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700 font-bold shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}><Settings size={20} /> {t.sidebar.settings}</button>
-              </>
+          <nav className="flex-1 p-4 space-y-1">
+            <button onClick={() => setActiveTab('dashboard')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl ${activeTab === 'dashboard' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><LayoutDashboard size={20} /> {t.sidebar.dashboard}</button>
+            <button onClick={() => setActiveTab('analytics')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl ${activeTab === 'analytics' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><BarChart3 size={20} /> {t.sidebar.analytics}</button>
+            <button onClick={() => setActiveTab('newBudget')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl ${activeTab === 'newBudget' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><PlusCircle size={20} /> {t.sidebar.newBudget}</button>
+            <button onClick={() => setActiveTab('subscription')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl ${activeTab === 'subscription' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><CreditCard size={20} /> {t.sidebar.subscription}</button>
+            <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl ${activeTab === 'settings' ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><Settings size={20} /> {t.sidebar.settings}</button>
+            
+            {isMaster && (
+              <div className="pt-4 mt-4 border-t border-slate-100">
+                <p className="px-4 mb-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">Master Admin</p>
+                <button onClick={() => setActiveTab('master')} className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl ${activeTab === 'master' ? 'bg-slate-900 text-white font-bold' : 'text-slate-600 hover:bg-slate-50'}`}><ShieldCheck size={20} /> Painel Master</button>
+              </div>
             )}
           </nav>
-          
-          <div className="p-4 border-t space-y-4">
-            {!isMaster && isFree && (
-              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 space-y-2">
-                <div className="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-slate-400">
-                  <span>{t.usageBudgets}</span>
-                  <span className={usageCount >= 3 ? 'text-red-500' : ''}>{usageCount}/3</span>
-                </div>
-                <div className="h-1.5 w-full bg-slate-200 rounded-full overflow-hidden">
-                  <div className={`h-full transition-all duration-1000 ${usageCount >= 3 ? 'bg-red-500' : 'bg-indigo-600'}`} style={{ width: `${usagePercent}%` }}></div>
-                </div>
-              </div>
-            )}
-            <div className="bg-slate-900 p-4 rounded-2xl shadow-xl">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center overflow-hidden">
-                  {isMaster ? (
-                    <ShieldCheck size={20} className="text-indigo-600" />
-                  ) : (
-                    <img src={displayCompany?.logo} alt={displayCompany?.name} className="max-w-full max-h-full object-contain" />
-                  )}
-                </div>
-                <div className="truncate">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest leading-none mb-1">{isMaster ? 'Super Admin' : displayCompany?.plan}</p>
-                  <p className="text-xs font-black text-white truncate">{isMaster ? 'Jeferson Goes' : displayCompany?.name}</p>
-                </div>
-              </div>
-              <button onClick={handleLogout} className="w-full text-[10px] font-black uppercase tracking-[0.1em] text-red-400 py-2 border border-red-400/20 hover:bg-red-400/10 rounded-xl transition-all">{t.sidebar.logout}</button>
-            </div>
-          </div>
+          <div className="p-4 border-t"><button onClick={handleLogout} className="w-full text-xs font-black text-red-500 uppercase py-3 border border-red-100 rounded-xl hover:bg-red-50">Logout</button></div>
         </aside>
 
         <main className="flex-1 md:ml-64">
-          <header className="h-16 bg-white/80 backdrop-blur-md border-b flex items-center justify-between px-8 sticky top-0 z-30">
-            <div className="flex items-center gap-4">
-              <h2 className="font-black text-slate-800 uppercase tracking-[0.2em] text-xs">
-                {isMaster ? 'Controlo Global Átrio' : (activeTab === 'budgetHub' ? `${t.sidebar.dashboard} / ${editingBudget?.client.name}` : (t.sidebar[activeTab] || activeTab))}
-              </h2>
-            </div>
-            
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
-               {(Object.keys(COUNTRY_CONFIGS) as CountryCode[]).map(code => (
-                 <button 
-                  key={code} 
-                  onClick={() => handleCountrySwitch(code)}
-                  className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm transition-all ${appCountry === code ? 'bg-white shadow-sm scale-110 border border-slate-200' : 'opacity-40 hover:opacity-100 grayscale hover:grayscale-0'}`}
-                 >
-                   {COUNTRY_CONFIGS[code].flag}
-                 </button>
-               ))}
+          <header className="h-16 bg-white border-b flex items-center justify-between px-8 sticky top-0 z-30">
+            <h2 className="font-black text-xs uppercase tracking-widest">{t.sidebar[activeTab] || activeTab}</h2>
+            <div className="flex gap-2">
+              {(['PT', 'BR', 'ES'] as CountryCode[]).map(c => <button key={c} onClick={() => { setAppCountry(c); }} className={`w-8 h-8 rounded-lg flex items-center justify-center ${appCountry === c ? 'bg-slate-100 ring-1 ring-slate-200' : 'opacity-40'}`}>{COUNTRY_CONFIGS[c].flag}</button>)}
             </div>
           </header>
           <div className="p-8">
-            {activeTab === 'master' && <MasterDashboard />}
-            {activeTab === 'notifications' && (
-              <NotificationsHub 
-                notifications={relevantNotifications} 
-                isMaster={isMaster} 
-                onSync={handleSyncNotifications}
-                onMarkAsRead={handleMarkAsRead}
-                readNotifications={readNotifications}
-                company={displayCompany!}
-              />
-            )}
-            {!isMaster && (
-              <>
-                {activeTab === 'dashboard' && <Dashboard budgets={companyBudgets} onViewBudget={openBudgetHub} onNewBudget={() => { setEditingBudget(null); setActiveTab('newBudget'); }} company={displayCompany!} />}
-                {activeTab === 'analytics' && <Analytics budgets={companyBudgets} company={displayCompany!} onUpgrade={() => setActiveTab('subscription')} />}
-                {activeTab === 'newBudget' && <BudgetEditor company={displayCompany!} onSave={handleSaveBudget} initialData={editingBudget} onCancel={() => setActiveTab('dashboard')} onUpgrade={() => setActiveTab('subscription')} />}
-                
-                {activeTab === 'budgetHub' && editingBudget && (
-                  <div className="space-y-8">
-                    <div className="flex flex-wrap items-center gap-2 bg-white p-2 rounded-2xl border border-slate-200 shadow-sm w-fit">
-                      {editingBudget.status === 'Approved' && (
-                        <button onClick={() => setHubTab('summary')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${hubTab === 'summary' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}>{t.hub.summary}</button>
-                      )}
-                      <button onClick={() => setHubTab('info')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${hubTab === 'info' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}>{t.hub.info}</button>
-                      {editingBudget.status === 'Approved' && (
-                        <>
-                          <button onClick={() => setHubTab('payments')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${hubTab === 'payments' ? 'bg-amber-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}>{t.hub.payments}</button>
-                          <button onClick={() => setHubTab('expenses')} className={`px-6 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${hubTab === 'expenses' ? 'bg-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-50'}`}>{t.hub.expenses}</button>
-                        </>
-                      )}
-                      <div className="h-6 w-px bg-slate-100 mx-2"></div>
-                      <button onClick={() => setActiveTab('dashboard')} className="px-4 py-3 rounded-xl text-slate-400 hover:text-red-500 transition-colors flex items-center gap-2 text-[10px] font-black uppercase"><ArrowLeft size={14} /> {t.hub.back}</button>
-                    </div>
-
-                    {hubTab === 'summary' && editingBudget.status === 'Approved' && <ProjectDashboard budget={editingBudget} company={displayCompany!} />}
-                    {hubTab === 'info' && <BudgetEditor company={displayCompany!} onSave={handleSaveBudget} initialData={editingBudget} onCancel={() => setActiveTab('dashboard')} onUpgrade={() => setActiveTab('subscription')} />}
-                    {hubTab === 'payments' && <PaymentManager budget={editingBudget} company={displayCompany!} onUpgrade={() => setActiveTab('subscription')} onUpdateBudget={(b) => { handleUpdateBudget(b); setEditingBudget(b); }} />}
-                    {hubTab === 'expenses' && <ExpenseManager budget={editingBudget} company={displayCompany!} onUpgrade={() => setActiveTab('subscription')} onUpdateBudget={(b) => { handleUpdateBudget(b); setEditingBudget(b); }} />}
+            {activeTab === 'dashboard' && <Dashboard budgets={budgets} onViewBudget={(b) => { setEditingBudget(b); setActiveTab('budgetHub'); }} onNewBudget={() => { setEditingBudget(null); setActiveTab('newBudget'); }} company={activeCompany!} />}
+            {activeTab === 'newBudget' && <BudgetEditor company={activeCompany!} onSave={handleSaveBudget} initialData={editingBudget} onCancel={() => setActiveTab('dashboard')} onUpgrade={() => setActiveTab('subscription')} />}
+            {activeTab === 'analytics' && <Analytics budgets={budgets} company={activeCompany!} onUpgrade={() => setActiveTab('subscription')} />}
+            {activeTab === 'subscription' && <SubscriptionPage company={activeCompany!} onUpgrade={() => {}} />}
+            {activeTab === 'settings' && activeCompany && <CompanySettings company={activeCompany} user={currentUser} onSave={() => {}} />}
+            {activeTab === 'master' && isMaster && <MasterDashboard />}
+            {activeTab === 'notifications' && <NotificationsHub notifications={notifications} isMaster={isMaster} onSync={setNotifications} onMarkAsRead={(id) => setReadNotifications([...readNotifications, id])} readNotifications={readNotifications} company={activeCompany} />}
+            
+            {activeTab === 'budgetHub' && editingBudget && (
+              <div className="space-y-8">
+                <div className="flex items-center justify-between">
+                  <button onClick={() => setActiveTab('dashboard')} className="flex items-center gap-2 text-slate-500 hover:text-slate-900 transition-colors font-black text-xs uppercase tracking-widest">
+                    <ArrowLeft size={16} /> {t.hub.back}
+                  </button>
+                  <div className="flex bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200">
+                    <button onClick={() => setHubTab('summary')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'summary' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Resumo</button>
+                    <button onClick={() => setHubTab('info')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'info' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Info</button>
+                    <button onClick={() => setHubTab('payments')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'payments' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Pagamentos</button>
+                    <button onClick={() => setHubTab('expenses')} className={`px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${hubTab === 'expenses' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}>Custos</button>
                   </div>
-                )}
-
-                {activeTab === 'settings' && <CompanySettings company={displayCompany!} user={currentUser!} onSave={handleUpdateCompany} />}
-                {activeTab === 'subscription' && (
-                  <SubscriptionPage 
-                    company={displayCompany!} 
-                    onUpgrade={() => {
-                      const expiry = new Date();
-                      expiry.setDate(expiry.getDate() + 30);
-                      handleUpdateCompany({
-                        ...activeCompany!, 
-                        plan: 'Premium', 
-                        subscriptionExpiryDate: expiry.toISOString().split('T')[0]
-                      }); 
-                      setActiveTab('dashboard');
-                    }} 
-                  />
-                )}
-              </>
+                </div>
+                {hubTab === 'summary' && <ProjectDashboard budget={editingBudget} company={activeCompany!} />}
+                {hubTab === 'info' && <BudgetEditor company={activeCompany!} onSave={handleSaveBudget} initialData={editingBudget} onCancel={() => setActiveTab('dashboard')} onUpgrade={() => setActiveTab('subscription')} />}
+                {hubTab === 'payments' && <PaymentManager budget={editingBudget} company={activeCompany!} onUpdateBudget={handleSaveBudget} onUpgrade={() => setActiveTab('subscription')} />}
+                {hubTab === 'expenses' && <ExpenseManager budget={editingBudget} company={activeCompany!} onUpdateBudget={handleSaveBudget} onUpgrade={() => setActiveTab('subscription')} />}
+              </div>
             )}
           </div>
         </main>

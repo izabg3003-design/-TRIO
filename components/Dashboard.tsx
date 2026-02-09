@@ -1,6 +1,6 @@
 
 import React, { useMemo } from 'react';
-import { Budget, Specialty, Company } from '../types';
+import { Budget, Specialty, Company } from '../types.ts';
 import { 
   FileText, 
   Plus, 
@@ -17,7 +17,7 @@ import {
   Hammer,
   Eye
 } from 'lucide-react';
-import { COUNTRY_CONFIGS, SPECIALTY_COLORS } from '../constants';
+import { COUNTRY_CONFIGS, SPECIALTY_COLORS } from '../constants.tsx';
 
 interface DashboardProps {
   budgets: Budget[];
@@ -203,7 +203,7 @@ const Dashboard: React.FC<DashboardProps> = ({ budgets, onViewBudget, onNewBudge
                  </p>
                </div>
                <button 
-                onClick={() => {}} // Tab switch handled externally
+                onClick={() => {}} 
                 className="w-full bg-white text-indigo-950 py-4 rounded-2xl font-black text-xs uppercase tracking-[0.2em] hover:bg-indigo-50 transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95"
                >
                  {t.sidebar.analytics} <ArrowRight size={14} />
