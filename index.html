@@ -9,30 +9,88 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
     <style>
-        body { font-family: 'Inter', sans-serif; }
-        @media print {
-            .no-print { display: none; }
+        body { font-family: 'Inter', sans-serif; margin: 0; padding: 0; }
+        #root:empty { display: none; }
+        #emergency-loader {
+            position: fixed; inset: 0; background: #0f172a;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: white; z-index: 9999; text-align: center; padding: 20px;
         }
-        /* Custom scrollbar for a cleaner look */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        #error-display {
+            display: none; background: #450a0a; color: #fecaca;
+            padding: 20px; margin-top: 20px; border-radius: 12px;
+            font-family: monospace; font-size: 12px; max-width: 80%;
+            text-align: left; overflow: auto;
+        }
     </style>
-<script type="importmap">
+    <script type="importmap">
 {
   "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@^0.563.0",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "react": "https://esm.sh/react@^19.2.4",
+    "react": "https://esm.sh/react@18.2.0",
+    "react-dom": "https://esm.sh/react-dom@18.2.0",
+    "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+    "react/jsx-runtime": "https://esm.sh/react@18.2.0/jsx-runtime",
+    "lucide-react": "https://esm.sh/lucide-react@0.344.0?external=react,react-dom",
+    "recharts": "https://esm.sh/recharts@2.12.2?external=react,react-dom",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.7",
     "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "recharts": "https://esm.sh/recharts@^2.12.7",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.95.3"
+    "react/": "https://esm.sh/react@^19.2.4/"
   }
 }
 </script>
 </head>
 <body class="bg-slate-50 text-slate-900">
+    <!-- Ecrã de carregamento/erro que desaparece quando o React monta -->
+    <div id="emergency-loader">
+        <div class="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500 mb-4"></div>
+        <h1 style="font-weight: 900; letter-spacing: 0.1em; text-transform: uppercase;">Átrio Cloud</h1>
+        <p id="boot-status" style="font-size: 10px; opacity: 0.5; margin-top: 10px;">A INICIALIZAR MÓDULOS...</p>
+        
+        <div id="error-display">
+            <strong style="display: block; margin-bottom: 10px;">ERRO DE ARRANQUE DETETADO:</strong>
+            <div id="error-text"></div>
+            <button onclick="location.reload()" style="margin-top: 15px; background: white; color: black; padding: 5px 10px; border-radius: 4px; font-weight: bold; cursor: pointer;">TENTAR NOVAMENTE</button>
+        </div>
+    </div>
+
     <div id="root"></div>
+
+    <script>
+        // Capturador global de erros para o ecrã branco
+        window.addEventListener('error', function(event) {
+            const display = document.getElementById('error-display');
+            const status = document.getElementById('boot-status');
+            const text = document.getElementById('error-text');
+            if (display && status && text) {
+                status.style.display = 'none';
+                display.style.display = 'block';
+                text.innerText = event.message + '\nEm: ' + event.filename + ':' + event.lineno;
+            }
+            console.error('Boot Error:', event);
+        });
+
+        window.addEventListener('unhandledrejection', function(event) {
+            const display = document.getElementById('error-display');
+            const status = document.getElementById('boot-status');
+            const text = document.getElementById('error-text');
+            if (display && status && text) {
+                status.style.display = 'none';
+                display.style.display = 'block';
+                text.innerText = 'Promise Rejection: ' + event.reason;
+            }
+            console.error('Unhandled Rejection:', event.reason);
+        });
+
+        // Se o root for preenchido, removemos o loader
+        const observer = new MutationObserver(function(mutations) {
+            const root = document.getElementById('root');
+            const loader = document.getElementById('emergency-loader');
+            if (root && root.children.length > 0 && loader) {
+                loader.style.display = 'none';
+                observer.disconnect();
+            }
+        });
+        observer.observe(document.getElementById('root'), { childList: true });
+    </script>
 </body>
 </html>
