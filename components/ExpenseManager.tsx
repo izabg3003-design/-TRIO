@@ -39,7 +39,7 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ budget, company, onUpda
     }
 
     const newItem: ExpenseItem = {
-      id: crypto.randomUUID(),
+      id: `exp_${Math.random().toString(36).substr(2, 9)}`,
       description: '',
       unit: 'un',
       quantity: 1,
@@ -65,14 +65,13 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ budget, company, onUpda
   };
 
   const totals = useMemo(() => {
-    const revenue = budget.items.reduce((acc, item) => acc + (item.quantity * item.pricePerUnit), 0) * (1 + budget.taxRate / 100);
+    const revenue = budget.items.reduce((acc, item) => acc + (item.quantity * item.pricePerUnit), 0) * (1 + (budget.isVatEnabled ? budget.taxRate : 0) / 100);
     const costs = (budget.expenses || []).reduce((acc, exp) => acc + (exp.quantity * exp.pricePerUnit), 0);
     return { revenue, costs, profit: revenue - costs };
   }, [budget]);
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      {/* Resumo Financeiro da Obra */}
       <div className="bg-white p-8 rounded-[2.5rem] border border-slate-200 shadow-sm grid grid-cols-1 sm:grid-cols-3 gap-8">
         <div className="space-y-1">
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Total Orçamentado</p>
@@ -94,11 +93,10 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ budget, company, onUpda
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-4">
              <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
-               <Hammer size={16} className="text-indigo-600" /> Folha de Lançamentos de Obra
+               <Hammer size={16} className="text-indigo-600" /> Folha de Lançamentos
              </h3>
              {isFree && (
                <span className={`text-[9px] font-black px-3 py-1 rounded-full uppercase flex items-center gap-1 ${isLimitReached ? 'bg-red-50 text-red-600 border border-red-100' : 'bg-amber-50 text-amber-600 border border-amber-100'}`}>
-                 {isLimitReached ? <AlertCircle size={10} /> : <Crown size={10} />}
                  Itens: {expensesCount}/3
                </span>
              )}
@@ -107,11 +105,7 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ budget, company, onUpda
             onClick={handleAddExpense}
             className={`px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg transition-all flex items-center gap-2 active:scale-95 ${isLimitReached ? 'bg-amber-50 text-amber-600 border border-amber-100' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
           >
-            {isLimitReached ? (
-              <><Crown size={14} /> Fazer Upgrade</>
-            ) : (
-              <><Plus size={14} /> {t.expenses.addItem}</>
-            )}
+            <Plus size={14} /> {t.expenses.addItem}
           </button>
         </div>
 
@@ -142,7 +136,7 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ budget, company, onUpda
                         type="text" 
                         value={exp.description} 
                         onChange={e => handleUpdateExpense(exp.id, 'description', e.target.value)}
-                        placeholder="Material, Cimento, Mão de obra..."
+                        placeholder="Material..."
                         className="w-full bg-transparent font-bold text-slate-700 focus:text-indigo-600 outline-none"
                       />
                     </td>
@@ -174,28 +168,12 @@ const ExpenseManager: React.FC<ExpenseManagerProps> = ({ budget, company, onUpda
                       {formatCurrency(exp.quantity * exp.pricePerUnit)}
                     </td>
                     <td className="py-4 pl-4 text-right">
-                      <button 
-                        onClick={() => handleRemoveExpense(exp.id)}
-                        className="p-2 text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                      >
-                        <Trash2 size={16} />
-                      </button>
+                      <button onClick={() => handleRemoveExpense(exp.id)} className="p-2 text-slate-300 hover:text-red-500 transition-colors"><Trash2 size={16} /></button>
                     </td>
                   </tr>
                 ))
               )}
             </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-slate-900 bg-slate-50/30">
-                <td colSpan={4} className="py-6 font-black text-xs uppercase tracking-widest text-slate-900 pl-4">
-                  Soma Total de Gastos
-                </td>
-                <td className="py-6 text-right font-black text-lg text-red-600 pr-2">
-                   {formatCurrency(totals.costs)}
-                </td>
-                <td></td>
-              </tr>
-            </tfoot>
           </table>
         </div>
       </div>
