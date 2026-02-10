@@ -56,7 +56,6 @@
     <div id="root"></div>
 
     <script>
-        // Capturador global de erros para o ecrã branco
         window.addEventListener('error', function(event) {
             const display = document.getElementById('error-display');
             const status = document.getElementById('boot-status');
@@ -81,7 +80,6 @@
             console.error('Unhandled Rejection:', event.reason);
         });
 
-        // Se o root for preenchido, removemos o loader
         const observer = new MutationObserver(function(mutations) {
             const root = document.getElementById('root');
             const loader = document.getElementById('emergency-loader');
